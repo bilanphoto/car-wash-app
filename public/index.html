@@ -185,19 +185,17 @@
                     const data = await res.json();
                     console.log('AI for Thai response:', data);
                     
-                    if (data.result && data.result.length > 0) {
-                        const result = data.result[0];
-                        setPlate(result.license_plate || result.lp || '');
-                        setProvince(result.province || '');
-                    } else if (data.license_plate) {
-                        setPlate(data.license_plate);
-                        setProvince(data.province || '');
-                    } else if (data.lp) {
-                        setPlate(data.lp);
-                        setProvince(data.province || '');
-                    } else {
-                        setError('ไม่พบป้ายทะเบียน กรุณากรอกเอง');
-                    }
+// AI for Thai response เป็น array: [{ lpr: "5กข2662", province: "..." }]
+if (Array.isArray(data) && data.length > 0) {
+    const result = data[0];
+    setPlate(result.lpr || '');
+    setProvince(result.province || '');
+} else if (data.lpr) {
+    setPlate(data.lpr);
+    setProvince(data.province || '');
+} else {
+    setError('ไม่พบป้ายทะเบียน กรุณากรอกเอง');
+}
                 } catch (err) {
                     console.error('Error:', err);
                     setError('เกิดข้อผิดพลาด: ' + err.message);
