@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Car Wash - ระบบรับรถ</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Kanit', sans-serif; }
+        input, select { font-size: 16px !important; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // ==================== MAIN APP ====================
+        function CarWashSystem() {
+            const [page, setPage] = useState('reception');
+            const [queue, setQueue] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('carWashQueue') || '[]'); } catch { return []; }
+            });
+            const [history, setHistory] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('carWashHistory') || '[]'); } catch { return []; }
+            });
+
+            useEffect(() => {
+                localStorage.setItem('carWashQueue', JSON.stringify(queue));
+            }, [queue]);
+
+            useEffect(() => {
+                localStorage.setItem('carWashHistory', JSON.stringify(history));
+            }, [history]);
+
+            const addToQueue = (car) => {
+                const newCar = {
+                    ...car,
+                    id: Date.now(),
+                    queueNumber: (queue.length > 0 ? Math.max(...queue.map(c => c.queueNumber || 0)) : 0) + 1,
+                    status: 'waiting',
+                    createdAt: new Date().toISOString(),
+                    time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+                };
+                setQueue(prev => [...prev, newCar]);
+                return newCar;
+            };
+
+            const updateStatus = (id, status) => {
+                setQueue(prev => prev.map(car => 
+                    car.id === id ? { ...car, status, updatedAt: new Date().toISOString() } : car
+                ));
+            };
+
+            const completeCar = (id) => {
+                const car = queue.find(c => c.id === id);
+                if (car) {
+                    const completedCar = { ...car, status: 'done', completedAt: new Date().toISOString() };
+                    setHistory(prev => [completedCar, ...prev]);
+                    setQueue(prev => prev.filter(c => c.id !== id));
+                }
+            };
+
+            const removeFromQueue = (id) => setQueue(prev => prev.filter(c => c.id !== id));
+            const clearQueue = () => setQueue([]);
+            const clearHistory = () => setHistory([]);
+
+            return (
+                <div className="min-h-screen bg-slate-900">
+                    <nav className="bg-slate-800 border-b border-slate-700 sticky top-0 z-50">
+                        <div className="max-w-6xl mx-auto px-4">
+                            <div className="flex items-center justify-between h-14">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-2xl">🚗</span>
+                                    <span className="text-white font-semibold hidden sm:block">Car Wash</span>
+                                </div>
+                                <div className="flex gap-1">
+                                    {[
+                                        { id: 'reception', icon: '📝', label: 'รับรถ' },
+                                        { id: 'dashboard', icon: '📺', label: 'Dashboard' },
+                                        { id: 'admin', icon: '⚙️', label: 'Admin' }
+                                    ].map(tab => (
+                                        <button
+                                            key={tab.id}
+                                            onClick={() => setPage(tab.id)}
+                                            className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1
+                                                ${page === tab.id ? 'bg-cyan-500 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                                        >
+                                            <span>{tab.icon}</span>
+                                            <span className="hidden sm:inline">{tab.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </nav>
+
+                    {page === 'reception' && <ReceptionPage queue={queue} addToQueue={addToQueue} updateStatus={updateStatus} />}
+                    {page === 'dashboard' && <DashboardPage queue={queue} />}
+                    {page === 'admin' && <AdminPage queue={queue} history={history} updateStatus={updateStatus} completeCar={completeCar} removeFromQueue={removeFromQueue} clearQueue={clearQueue} clearHistory={clearHistory} />}
+                </div>
+            );
+        }
+
+        // ==================== RECEPTION PAGE ====================
+        function ReceptionPage({ queue, addToQueue, updateStatus }) {
+            const [activeTab, setActiveTab] = useState('register');
+            const [image, setImage] = useState(null);
+            const [imageBase64, setImageBase64] = useState(null);
+            const [mediaType, setMediaType] = useState('image/jpeg');
+            const [plate, setPlate] = useState('');
+            const [province, setProvince] = useState('');
+            const [service, setService] = useState('ล้างรถ');
+            const [price, setPrice] = useState(100);
+            const [phone, setPhone] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [ticket, setTicket] = useState(null);
+            
+            const cameraRef = useRef(null);
+            const fileRef = useRef(null);
+
+            const services = [
+                { name: 'ล้างรถ', price: 100 },
+                { name: 'ล้าง + แว็กซ์', price: 200 },
+                { name: 'ล้าง + ดูดฝุ่น + แว็กซ์', price: 350 },
+                { name: 'ทำความสะอาดภายใน', price: 500 },
+            ];
+
+            const waiting = queue.filter(c => c.status === 'waiting').sort((a, b) => a.queueNumber - b.queueNumber);
+            const washing = queue.filter(c => c.status === 'washing');
+            const washed = queue.filter(c => c.status === 'washed');
+
+            const handleImage = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const dataUrl = ev.target.result;
+                    setImage(dataUrl);
+                    setImageBase64(dataUrl.split(',')[1]);
+                    setMediaType(dataUrl.match(/^data:([^;]+);/)?.[1] || 'image/jpeg');
+                    setError('');
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const readPlate = async () => {
+                if (!imageBase64) return;
+                setIsLoading(true);
+                setError('');
+                
+                try {
+                    // แปลง base64 เป็น Blob
+                    const byteString = atob(imageBase64);
+                    const ab = new ArrayBuffer(byteString.length);
+                    const ia = new Uint8Array(ab);
+                    for (let i = 0; i < byteString.length; i++) {
+                        ia[i] = byteString.charCodeAt(i);
+                    }
+                    const blob = new Blob([ab], { type: mediaType });
+                    
+                    // สร้าง FormData
+                    const formData = new FormData();
+                    formData.append('image', blob, 'plate.jpg');
+                    
+                    // เรียก AI for Thai API
+                    const res = await fetch('https://api.aiforthai.in.th/lpr-v2', {
+                        method: 'POST',
+                        headers: {
+                            'Apikey': 'ovLBG3crDxeZp75sgbPymmrT0loH8EZL'
+                        },
+                        body: formData
+                    });
+                    
+                    const data = await res.json();
+                    console.log('AI for Thai response:', data);
+                    
+                    if (data.result && data.result.length > 0) {
+                        const result = data.result[0];
+                        setPlate(result.license_plate || result.lp || '');
+                        setProvince(result.province || '');
+                    } else if (data.license_plate) {
+                        setPlate(data.license_plate);
+                        setProvince(data.province || '');
+                    } else if (data.lp) {
+                        setPlate(data.lp);
+                        setProvince(data.province || '');
+                    } else {
+                        setError('ไม่พบป้ายทะเบียน กรุณากรอกเอง');
+                    }
+                } catch (err) {
+                    console.error('Error:', err);
+                    setError('เกิดข้อผิดพลาด: ' + err.message);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            const clearImage = () => {
+                setImage(null);
+                setImageBase64(null);
+                if (cameraRef.current) cameraRef.current.value = '';
+                if (fileRef.current) fileRef.current.value = '';
+            };
+
+            const handleServiceChange = (e) => {
+                const selected = services.find(s => s.name === e.target.value);
+                setService(selected.name);
+                setPrice(selected.price);
+            };
+
+            const submit = () => {
+                if (!plate.trim()) { alert('กรุณากรอกเลขทะเบียน'); return; }
+                const newCar = addToQueue({ plate: plate.trim().toUpperCase(), province, service, price, phone });
+                setTicket(newCar);
+                setPlate(''); setProvince(''); setPhone(''); clearImage();
+            };
+
+            const closeTicket = () => setTicket(null);
+            const startWashing = (id) => updateStatus(id, 'washing');
+            const markWashed = (id) => updateStatus(id, 'washed');
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-cyan-900 p-4 pb-20">
+                    <div className="max-w-lg mx-auto">
+                        <div className="text-center py-4">
+                            <h1 className="text-2xl font-bold text-white">📝 รับรถ</h1>
+                            <p className="text-cyan-300 text-sm">ลงทะเบียน & จัดการคิว</p>
+                        </div>
+
+                        <div className="flex gap-2 mb-4">
+                            <button onClick={() => setActiveTab('register')} className={`flex-1 py-3 rounded-xl font-medium transition ${activeTab === 'register' ? 'bg-cyan-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                                📷 ลงทะเบียน
+                            </button>
+                            <button onClick={() => setActiveTab('manage')} className={`flex-1 py-3 rounded-xl font-medium transition relative ${activeTab === 'manage' ? 'bg-cyan-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                                🔧 จัดการคิว
+                                {(waiting.length + washing.length) > 0 && (
+                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
+                                        {waiting.length + washing.length}
+                                    </span>
+                                )}
+                            </button>
+                        </div>
+
+                        {activeTab === 'register' && (
+                            <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-4 border border-white/20">
+                                <div className="grid grid-cols-2 gap-2 mb-3">
+                                    <button onClick={() => cameraRef.current?.click()} className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white py-3 rounded-xl font-medium shadow-lg active:scale-95 transition">📷 ถ่ายรูป</button>
+                                    <button onClick={() => fileRef.current?.click()} className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white py-3 rounded-xl font-medium shadow-lg active:scale-95 transition">🖼️ เลือกรูป</button>
+                                </div>
+                                
+                                <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleImage} className="hidden" />
+                                <input ref={fileRef} type="file" accept="image/*" onChange={handleImage} className="hidden" />
+                                
+                                {image ? (
+                                    <div className="relative mb-3">
+                                        <img src={image} alt="Preview" className="w-full h-36 object-cover rounded-xl border-2 border-cyan-400/50" />
+                                        <button onClick={clearImage} className="absolute top-2 right-2 w-8 h-8 bg-red-500 text-white rounded-full text-lg">×</button>
+                                    </div>
+                                ) : (
+                                    <div className="border-2 border-dashed border-cyan-400/30 rounded-xl p-6 text-center mb-3">
+                                        <div className="text-4xl mb-2 opacity-50">📸</div>
+                                        <p className="text-cyan-300/60 text-sm">ถ่ายรูปป้ายทะเบียน</p>
+                                    </div>
+                                )}
+                                
+                                <button onClick={readPlate} disabled={!image || isLoading} className="w-full bg-gradient-to-r from-violet-500 to-purple-500 text-white py-3 rounded-xl font-semibold shadow-lg disabled:opacity-50 mb-3 flex items-center justify-center gap-2">
+                                    {isLoading ? <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> กำลังอ่าน...</> : <>🔍 อ่านป้ายทะเบียน</>}
+                                </button>
+                                
+                                {error && <div className="bg-red-500/20 border border-red-400/30 rounded-xl p-3 mb-3"><p className="text-red-300 text-sm text-center">{error}</p></div>}
+                                
+                                <div className="space-y-3">
+                                    <div className="bg-gradient-to-b from-white to-gray-100 border-4 border-slate-700 rounded-lg p-3 text-center">
+                                        <div className="text-2xl font-bold text-slate-800 tracking-wider min-h-[32px]">{plate || '-'}</div>
+                                        {province && <div className="text-xs text-slate-600">{province}</div>}
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-cyan-300 text-sm mb-1">เลขทะเบียน <span className="text-red-400">*</span></label>
+                                        <input type="text" value={plate} onChange={(e) => setPlate(e.target.value)} placeholder="5กข 2662" className="w-full px-4 py-3 rounded-xl bg-white/95 text-slate-800 text-xl font-semibold text-center tracking-wider outline-none focus:ring-2 focus:ring-cyan-400" />
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-cyan-300 text-sm mb-1">จังหวัด</label>
+                                        <select value={province} onChange={(e) => setProvince(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-white/95 text-slate-800 outline-none">
+                                            <option value="">-- เลือก --</option>
+                                            {['กรุงเทพมหานคร','นนทบุรี','ปทุมธานี','สมุทรปราการ','ชลบุรี','เชียงใหม่','ภูเก็ต','ขอนแก่น','นครราชสีมา','อื่นๆ'].map(p => <option key={p} value={p}>{p}</option>)}
+                                        </select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-cyan-300 text-sm mb-1">บริการ</label>
+                                        <select value={service} onChange={handleServiceChange} className="w-full px-4 py-3 rounded-xl bg-white/95 text-slate-800 outline-none">
+                                            {services.map(s => <option key={s.name} value={s.name}>{s.name} - ฿{s.price}</option>)}
+                                        </select>
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="block text-cyan-300 text-sm mb-1">เบอร์โทร (ไม่บังคับ)</label>
+                                        <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0812345678" className="w-full px-4 py-3 rounded-xl bg-white/95 text-slate-800 outline-none" />
+                                    </div>
+                                    
+                                    <button onClick={submit} className="w-full bg-gradient-to-r from-emerald-500 to-green-500 text-white py-4 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition">✓ รับคิว</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'manage' && (
+                            <div className="space-y-4">
+                                <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-4 border border-white/20">
+                                    <h3 className="text-yellow-400 font-semibold mb-3 flex items-center gap-2"><span>⏳</span> รอคิว ({waiting.length})</h3>
+                                    {waiting.length === 0 ? (
+                                        <div className="text-center py-6 text-slate-400">ไม่มีคิวรอ</div>
+                                    ) : (
+                                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                                            {waiting.map((car, i) => (
+                                                <div key={car.id} className={`bg-slate-700/50 rounded-xl p-3 ${i === 0 ? 'ring-2 ring-yellow-500/50' : ''}`}>
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${i === 0 ? 'bg-yellow-500 text-white' : 'bg-slate-600 text-slate-300'}`}>{car.queueNumber}</div>
+                                                            <div>
+                                                                <div className="text-white font-semibold">{car.plate}</div>
+                                                                <div className="text-slate-400 text-xs">{car.service} • {car.time}</div>
+                                                            </div>
+                                                        </div>
+                                                        {i === 0 && <button onClick={() => startWashing(car.id)} className="bg-green-500 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-600 active:scale-95 transition">🚿 เริ่มล้าง</button>}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-4 border border-green-500/30">
+                                    <h3 className="text-green-400 font-semibold mb-3 flex items-center gap-2"><span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> กำลังล้าง ({washing.length})</h3>
+                                    {washing.length === 0 ? (
+                                        <div className="text-center py-6 text-slate-400">ไม่มีรถกำลังล้าง</div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {washing.map(car => (
+                                                <div key={car.id} className="bg-green-500/20 rounded-xl p-3">
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="bg-green-500 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold">{car.queueNumber}</div>
+                                                            <div>
+                                                                <div className="text-white font-semibold">{car.plate}</div>
+                                                                <div className="text-green-300 text-xs">{car.service}</div>
+                                                            </div>
+                                                        </div>
+                                                        <button onClick={() => markWashed(car.id)} className="bg-blue-500 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-600 active:scale-95 transition">✓ ล้างเสร็จ</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-4 border border-blue-500/30">
+                                    <h3 className="text-blue-400 font-semibold mb-3 flex items-center gap-2"><span>🚙</span> ล้างเสร็จ - รอรับรถ ({washed.length})</h3>
+                                    {washed.length === 0 ? (
+                                        <div className="text-center py-6 text-slate-400">ไม่มีรถรอรับ</div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {washed.map(car => (
+                                                <div key={car.id} className="bg-blue-500/20 rounded-xl p-3">
+                                                    <div className="flex justify-between items-center">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="bg-blue-500 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold">{car.queueNumber}</div>
+                                                            <div>
+                                                                <div className="text-white font-semibold">{car.plate}</div>
+                                                                <div className="text-blue-300 text-xs">{car.service} • ฿{car.price}</div>
+                                                            </div>
+                                                        </div>
+                                                        <span className="bg-blue-500/30 text-blue-300 px-3 py-1 rounded-lg text-sm">รอ Admin</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <p className="text-slate-500 text-xs mt-3 text-center">* Admin จะกดรับรถเมื่อลูกค้ามารับ + ชำระเงิน</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {ticket && (
+                        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={closeTicket}>
+                            <div className="bg-white rounded-2xl p-6 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
+                                <div className="text-6xl mb-4">🎫</div>
+                                <h2 className="text-2xl font-bold text-slate-800 mb-2">บัตรคิว</h2>
+                                <div className="bg-gradient-to-br from-cyan-500 to-blue-600 text-white rounded-xl p-4 mb-4">
+                                    <div className="text-6xl font-bold">{ticket.queueNumber}</div>
+                                    <div className="text-cyan-100">หมายเลขคิว</div>
+                                </div>
+                                <div className="bg-slate-100 rounded-xl p-4 mb-4 text-left">
+                                    <div className="flex justify-between py-1 border-b border-slate-200"><span className="text-slate-500">ทะเบียน</span><span className="font-semibold">{ticket.plate}</span></div>
+                                    <div className="flex justify-between py-1 border-b border-slate-200"><span className="text-slate-500">บริการ</span><span className="font-semibold">{ticket.service}</span></div>
+                                    <div className="flex justify-between py-1 border-b border-slate-200"><span className="text-slate-500">ราคา</span><span className="font-semibold text-green-600">฿{ticket.price}</span></div>
+                                    <div className="flex justify-between py-1"><span className="text-slate-500">เวลา</span><span className="font-semibold">{ticket.time}</span></div>
+                                </div>
+                                <p className="text-slate-500 text-sm mb-4">กรุณารอเรียกคิว</p>
+                                <button onClick={closeTicket} className="w-full bg-slate-800 text-white py-3 rounded-xl font-semibold">ปิด</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ==================== DASHBOARD PAGE ====================
+        function DashboardPage({ queue }) {
+            const washing = queue.filter(c => c.status === 'washing');
+            const washed = queue.filter(c => c.status === 'washed');
+            const waiting = queue.filter(c => c.status === 'waiting').sort((a, b) => a.queueNumber - b.queueNumber);
+            const nextUp = waiting.slice(0, 3);
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="text-center py-6">
+                            <h1 className="text-3xl font-bold text-white mb-2">📺 หน้าจอแสดงคิว</h1>
+                            <p className="text-slate-400">สำหรับลูกค้าดูสถานะ</p>
+                        </div>
+
+                        <div className="mb-6">
+                            <h2 className="text-xl font-semibold text-green-400 mb-3 flex items-center gap-2">
+                                <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span> กำลังล้างอยู่
+                            </h2>
+                            {washing.length === 0 ? (
+                                <div className="bg-slate-800/50 rounded-2xl p-8 text-center">
+                                    <div className="text-4xl mb-2">🚿</div>
+                                    <p className="text-slate-400">ว่าง - พร้อมรับรถ</p>
+                                </div>
+                            ) : (
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    {washing.map(car => (
+                                        <div key={car.id} className="bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-2 border-green-500/50 rounded-2xl p-6">
+                                            <div className="text-center">
+                                                <div className="text-4xl font-bold text-white mb-2">{car.plate}</div>
+                                                <div className="text-green-300 text-lg">{car.service}</div>
+                                                <div className="text-green-400 text-sm animate-pulse mt-2">🚿 กำลังล้าง...</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {washed.length > 0 && (
+                            <div className="mb-6">
+                                <h2 className="text-xl font-semibold text-blue-400 mb-3 flex items-center gap-2"><span>🚙</span> ล้างเสร็จแล้ว - เชิญรับรถ</h2>
+                                <div className="grid gap-3 md:grid-cols-2">
+                                    {washed.map(car => (
+                                        <div key={car.id} className="bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border-2 border-blue-500/50 rounded-2xl p-5 animate-pulse">
+                                            <div className="text-center">
+                                                <div className="text-3xl font-bold text-white mb-1">{car.plate}</div>
+                                                <div className="text-blue-300">✅ พร้อมรับรถ</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mb-6">
+                            <h2 className="text-xl font-semibold text-yellow-400 mb-3 flex items-center gap-2"><span>⏳</span> คิวถัดไป</h2>
+                            {nextUp.length === 0 ? (
+                                <div className="bg-slate-800/50 rounded-2xl p-8 text-center">
+                                    <div className="text-4xl mb-2">✨</div>
+                                    <p className="text-slate-400">ไม่มีคิวรอ</p>
+                                </div>
+                            ) : (
+                                <div className="grid gap-3 md:grid-cols-3">
+                                    {nextUp.map((car, i) => (
+                                        <div key={car.id} className={`bg-slate-800/80 rounded-xl p-4 border-2 ${i === 0 ? 'border-yellow-500/50 bg-yellow-500/10' : 'border-slate-700'}`}>
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${i === 0 ? 'bg-yellow-500 text-white' : 'bg-slate-700 text-slate-300'}`}>{i + 1}</div>
+                                                <div>
+                                                    <div className="text-xl font-bold text-white">{car.plate}</div>
+                                                    <div className="text-slate-400 text-sm">{car.service}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div>
+                            <h2 className="text-xl font-semibold text-slate-400 mb-3">📋 รอคิวทั้งหมด ({waiting.length} คัน)</h2>
+                            {waiting.length === 0 ? (
+                                <div className="bg-slate-800/30 rounded-xl p-6 text-center text-slate-500">ไม่มีคิวรอ</div>
+                            ) : (
+                                <div className="bg-slate-800/30 rounded-xl p-4 max-h-64 overflow-y-auto">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        {waiting.map((car, i) => (
+                                            <div key={car.id} className="bg-slate-700/50 rounded-lg p-3 text-center">
+                                                <div className="text-2xl font-bold text-cyan-400">{i + 1}</div>
+                                                <div className="text-white font-medium">{car.plate}</div>
+                                                <div className="text-slate-400 text-xs">{car.time}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== ADMIN PAGE ====================
+        function AdminPage({ queue, history, updateStatus, completeCar, removeFromQueue, clearQueue, clearHistory }) {
+            const [tab, setTab] = useState('queue');
+
+            const waiting = queue.filter(c => c.status === 'waiting').sort((a, b) => a.queueNumber - b.queueNumber);
+            const washing = queue.filter(c => c.status === 'washing');
+            const washed = queue.filter(c => c.status === 'washed');
+
+            const today = new Date().toDateString();
+            const todayHistory = history.filter(c => new Date(c.completedAt).toDateString() === today);
+            const todayRevenue = todayHistory.reduce((sum, c) => sum + (c.price || 0), 0);
+            
+            const thisMonth = new Date().getMonth();
+            const thisYear = new Date().getFullYear();
+            const monthHistory = history.filter(c => {
+                const d = new Date(c.completedAt);
+                return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+            });
+            const monthRevenue = monthHistory.reduce((sum, c) => sum + (c.price || 0), 0);
+
+            const serviceStats = {};
+            history.forEach(c => { serviceStats[c.service] = (serviceStats[c.service] || 0) + 1; });
+
+            return (
+                <div className="min-h-screen bg-slate-900 p-4">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="flex items-center justify-between mb-6">
+                            <h1 className="text-2xl font-bold text-white">⚙️ Admin Panel</h1>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                            <div className="bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-xl p-4">
+                                <div className="text-yellow-400 text-sm">รอคิว</div>
+                                <div className="text-3xl font-bold text-white">{waiting.length}</div>
+                            </div>
+                            <div className="bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/30 rounded-xl p-4">
+                                <div className="text-green-400 text-sm">กำลังล้าง</div>
+                                <div className="text-3xl font-bold text-white">{washing.length}</div>
+                            </div>
+                            <div className="bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-xl p-4">
+                                <div className="text-blue-400 text-sm">รอรับรถ</div>
+                                <div className="text-3xl font-bold text-white">{washed.length}</div>
+                            </div>
+                            <div className="bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-xl p-4">
+                                <div className="text-purple-400 text-sm">รายได้วันนี้</div>
+                                <div className="text-2xl font-bold text-white">฿{todayRevenue.toLocaleString()}</div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 mb-4">
+                            {[
+                                { id: 'queue', label: '📋 จัดการคิว', badge: washed.length },
+                                { id: 'history', label: '📜 ประวัติ' },
+                                { id: 'stats', label: '📊 สถิติ' }
+                            ].map(t => (
+                                <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-lg font-medium transition relative ${tab === t.id ? 'bg-cyan-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                                    {t.label}
+                                    {t.badge > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">{t.badge}</span>}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="bg-slate-800 rounded-2xl p-4">
+                            {tab === 'queue' && (
+                                <div className="space-y-6">
+                                    <div>
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h3 className="text-blue-400 font-semibold flex items-center gap-2"><span>🚙</span> ล้างเสร็จ - รอลูกค้ารับรถ ({washed.length})</h3>
+                                        </div>
+                                        {washed.length === 0 ? (
+                                            <div className="bg-slate-700/30 rounded-xl p-6 text-center text-slate-500">ไม่มีรถรอรับ</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {washed.map(car => (
+                                                    <div key={car.id} className="bg-blue-500/20 border border-blue-500/30 rounded-xl p-4">
+                                                        <div className="flex justify-between items-center">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="bg-blue-500 text-white w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg">{car.queueNumber}</div>
+                                                                <div>
+                                                                    <div className="text-white font-semibold text-lg">{car.plate}</div>
+                                                                    <div className="text-slate-400 text-sm">{car.service} • <span className="text-green-400 font-semibold">฿{car.price}</span></div>
+                                                                    {car.phone && <div className="text-slate-500 text-xs">📱 {car.phone}</div>}
+                                                                </div>
+                                                            </div>
+                                                            <button onClick={() => completeCar(car.id)} className="bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-600 active:scale-95 transition">💰 รับเงิน & เสร็จ</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <h3 className="text-green-400 font-semibold mb-3 flex items-center gap-2"><span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> กำลังล้าง ({washing.length})</h3>
+                                        {washing.length === 0 ? (
+                                            <div className="bg-slate-700/30 rounded-xl p-4 text-center text-slate-500">ไม่มีรถกำลังล้าง</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {washing.map(car => (
+                                                    <div key={car.id} className="bg-green-500/10 border border-green-500/20 rounded-xl p-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="bg-green-500/20 text-green-400 w-10 h-10 rounded-full flex items-center justify-center font-bold">{car.queueNumber}</div>
+                                                            <div>
+                                                                <div className="text-white font-medium">{car.plate}</div>
+                                                                <div className="text-slate-400 text-xs">{car.service}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    <div>
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h3 className="text-yellow-400 font-semibold">⏳ รอคิว ({waiting.length})</h3>
+                                            {queue.length > 0 && <button onClick={() => { if(confirm('ล้างคิวทั้งหมด?')) clearQueue(); }} className="text-red-400 text-xs hover:text-red-300">🗑️ ล้างทั้งหมด</button>}
+                                        </div>
+                                        {waiting.length === 0 ? (
+                                            <div className="bg-slate-700/30 rounded-xl p-4 text-center text-slate-500">ไม่มีคิวรอ</div>
+                                        ) : (
+                                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                {waiting.map(car => (
+                                                    <div key={car.id} className="bg-slate-700/30 rounded-xl p-3 flex justify-between items-center">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="bg-slate-600 text-slate-300 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">{car.queueNumber}</div>
+                                                            <div>
+                                                                <div className="text-white font-medium">{car.plate}</div>
+                                                                <div className="text-slate-400 text-xs">{car.service} • {car.time}</div>
+                                                            </div>
+                                                        </div>
+                                                        <button onClick={() => { if(confirm('ลบคิวนี้?')) removeFromQueue(car.id); }} className="text-red-400 hover:text-red-300 text-sm">🗑️</button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {tab === 'history' && (
+                                <div>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h2 className="text-lg font-semibold text-white">ประวัติ ({history.length} รายการ)</h2>
+                                        {history.length > 0 && <button onClick={() => { if(confirm('ล้างประวัติทั้งหมด?')) clearHistory(); }} className="text-red-400 text-sm hover:text-red-300">🗑️ ล้างประวัติ</button>}
+                                    </div>
+                                    
+                                    {history.length === 0 ? (
+                                        <div className="text-center py-8 text-slate-500">ยังไม่มีประวัติ</div>
+                                    ) : (
+                                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                                            {history.slice(0, 50).map(car => (
+                                                <div key={car.id} className="bg-slate-700/50 rounded-xl p-3 flex justify-between items-center">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="bg-emerald-500/20 text-emerald-400 w-8 h-8 rounded-full flex items-center justify-center text-sm">✓</div>
+                                                        <div>
+                                                            <div className="text-white font-medium">{car.plate}</div>
+                                                            <div className="text-slate-400 text-xs">{car.service}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-green-400 font-medium">฿{car.price}</div>
+                                                        <div className="text-slate-500 text-xs">{new Date(car.completedAt).toLocaleDateString('th-TH')} {new Date(car.completedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {tab === 'stats' && (
+                                <div>
+                                    <h2 className="text-lg font-semibold text-white mb-4">📊 สถิติ</h2>
+                                    
+                                    <div className="grid md:grid-cols-2 gap-4">
+                                        <div className="bg-slate-700/50 rounded-xl p-4">
+                                            <h3 className="text-slate-400 text-sm mb-3">💰 สรุปรายได้</h3>
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between"><span className="text-slate-400">วันนี้</span><span className="text-white font-semibold">฿{todayRevenue.toLocaleString()}</span></div>
+                                                <div className="flex justify-between"><span className="text-slate-400">เดือนนี้</span><span className="text-white font-semibold">฿{monthRevenue.toLocaleString()}</span></div>
+                                                <div className="flex justify-between"><span className="text-slate-400">ทั้งหมด</span><span className="text-white font-semibold">฿{history.reduce((s, c) => s + (c.price || 0), 0).toLocaleString()}</span></div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="bg-slate-700/50 rounded-xl p-4">
+                                            <h3 className="text-slate-400 text-sm mb-3">🚗 บริการยอดนิยม</h3>
+                                            <div className="space-y-2">
+                                                {Object.entries(serviceStats).sort((a, b) => b[1] - a[1]).map(([service, count]) => (
+                                                    <div key={service} className="flex justify-between items-center">
+                                                        <span className="text-slate-300 text-sm">{service}</span>
+                                                        <span className="bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded text-sm">{count} ครั้ง</span>
+                                                    </div>
+                                                ))}
+                                                {Object.keys(serviceStats).length === 0 && <div className="text-slate-500 text-sm">ยังไม่มีข้อมูล</div>}
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="bg-slate-700/50 rounded-xl p-4">
+                                            <h3 className="text-slate-400 text-sm mb-3">📈 จำนวนรถ</h3>
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between"><span className="text-slate-400">วันนี้</span><span className="text-white font-semibold">{todayHistory.length} คัน</span></div>
+                                                <div className="flex justify-between"><span className="text-slate-400">เดือนนี้</span><span className="text-white font-semibold">{monthHistory.length} คัน</span></div>
+                                                <div className="flex justify-between"><span className="text-slate-400">ทั้งหมด</span><span className="text-white font-semibold">{history.length} คัน</span></div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="bg-slate-700/50 rounded-xl p-4">
+                                            <h3 className="text-slate-400 text-sm mb-3">📊 ค่าเฉลี่ย</h3>
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between"><span className="text-slate-400">รายได้/คัน</span><span className="text-white font-semibold">฿{history.length > 0 ? Math.round(history.reduce((s, c) => s + (c.price || 0), 0) / history.length) : 0}</span></div>
+                                                <div className="flex justify-between"><span className="text-slate-400">รถ/วัน (เดือนนี้)</span><span className="text-white font-semibold">{monthHistory.length > 0 ? (monthHistory.length / new Date().getDate()).toFixed(1) : 0} คัน</span></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render
+        ReactDOM.createRoot(document.getElementById('root')).render(<CarWashSystem />);
+    </script>
+</body>
+</html>
